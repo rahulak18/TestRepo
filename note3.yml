@@ -1,0 +1,77 @@
+name: Auto Create & Merge PR from DummyTest20 to Dummy20c & Dummy20Dev (Weekdays 4 PM IST)
+
+on:
+  schedule:
+    # 4:00 PM IST = 10:30 AM UTC → Monday–Friday
+    - cron: "45 10 * * 1-5"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-pr-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create and merge PRs using PAT
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headBranch = 'DummyTest20';   // 🔸 FROM branch (source)
+            
+            // 🔸 Add multiple target branches here
+            const targetBranches = ['Dummy20c', 'Dummy20Dev'];   // 🔸 TO branches (targets)
+
+            for (const baseBranch of targetBranches) {
+              console.log(`\n=== Processing PR from ${headBranch} → ${baseBranch} ===`);
+
+              // 1. Check if a PR already exists for this branch pair
+              const { data: existing } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${headBranch}`,
+                base: baseBranch,
+                state: 'open'
+              });
+
+              let prNumber;
+              if (existing.length > 0) {
+                prNumber = existing[0].number;
+                console.log(`Found existing PR #${prNumber} for ${headBranch} → ${baseBranch}`);
+              } else {
+                const { data: pr } = await github.rest.pulls.create({
+                  owner,
+                  repo,
+                  head: headBranch,
+                  base: baseBranch,
+                  title: `Auto PR: Sync ${headBranch} → ${baseBranch}`,
+                  body: `This PR was created automatically by GitHub Actions using PAT.`
+                });
+                prNumber = pr.number;
+                console.log(`Created new PR #${prNumber} for ${headBranch} → ${baseBranch}`);
+              }
+
+              // 2. Try merging the PR
+              try {
+                const merge = await github.rest.pulls.merge({
+                  owner,
+                  repo,
+                  pull_number: prNumber,
+                  merge_method: 'merge'
+                });
+                if (merge.data.merged) {
+                  console.log(`✅ PR #${prNumber} merged successfully for ${baseBranch}`);
+                } else {
+                  console.log(`❌ PR #${prNumber} not merged for ${baseBranch}: ${JSON.stringify(merge.data)}`);
+                }
+              } catch (err) {
+                console.log(`❌ Merge failed for ${baseBranch}: ${err.message}`);
+              }
+            }
