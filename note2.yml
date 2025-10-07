@@ -1,0 +1,71 @@
+name: Auto Create & Merge PR from DummyTest20 to Dummy20c
+
+on:
+  push:
+    branches:
+      - DummyTest20
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-pr-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create and merge PR using PAT
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = 'DummyTest20';
+            const base = 'Dummy20c';
+
+            // 1. Check if a PR already exists
+            const { data: existing } = await github.rest.pulls.list({
+              owner,
+              repo,
+              head: `${owner}:${head}`,
+              base,
+              state: 'open'
+            });
+
+            let prNumber;
+            if (existing.length > 0) {
+              prNumber = existing[0].number;
+              console.log(`Found existing PR #${prNumber}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({
+                owner,
+                repo,
+                head,
+                base,
+                title: `Auto PR: Sync ${head} → ${base}`,
+                body: `This PR was created automatically by GitHub Actions using PAT.`
+              });
+              prNumber = pr.number;
+              console.log(`Created new PR #${prNumber}`);
+            }
+
+            // 2. Try merging the PR
+            try {
+              const merge = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: prNumber,
+                merge_method: 'merge'
+              });
+              if (merge.data.merged) {
+                console.log(`✅ PR #${prNumber} merged successfully`);
+              } else {
+                console.log(`❌ PR #${prNumber} not merged: ${JSON.stringify(merge.data)}`);
+              }
+            } catch (err) {
+              console.log(`❌ Merge failed for PR #${prNumber}: ${err.message}`);
+            }
