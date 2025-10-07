@@ -1,0 +1,61 @@
+name: Auto-create PRs from v1t -> v1c & v1dev
+
+on:
+  push:
+    branches:
+      - v1t
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create_prs:
+    name: Create or update PRs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v5
+
+      - name: Create PRs (v1t -> v1c, v1t -> v1dev)
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headBranch = context.ref.replace('refs/heads/', '');
+            const targets = ['v1c', 'v1dev'];
+
+            for (const base of targets) {
+              // Check for existing open PR
+              const { data: prs } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${headBranch}`,
+                base,
+                state: 'open',
+                per_page: 100
+              });
+
+              if (prs.length > 0) {
+                console.log(`PR already exists from ${headBranch} -> ${base}: ${prs[0].html_url}`);
+                continue;
+              }
+
+              // Create a new PR
+              const title = `Auto PR: Sync ${headBranch} → ${base}`;
+              const body = `This pull request was automatically created to sync branch **${headBranch}** into **${base}**.`;
+
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                title,
+                head: headBranch,
+                base,
+                body,
+                maintainer_can_modify: true
+              });
+
+              console.log(`Created PR: ${created.data.html_url}`);
+            }
