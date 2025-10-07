@@ -1,0 +1,77 @@
+name: Create & auto-merge PR from DummyTest20 -> Dummy20c
+
+on:
+  push:
+    branches:
+      - DummyTest20
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create_and_merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create or find PR from DummyTest20 -> Dummy20c and merge it
+        uses: actions/github-script@v8
+        with:
+          # Use default token GITHUB_TOKEN (works if repo/org allows)
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = context.ref.replace('refs/heads/',''); // should be DummyTest20
+            const base = 'Dummy20c';
+
+            // 1) Look for an open PR from head -> base
+            const { data: existing } = await github.rest.pulls.list({
+              owner,
+              repo,
+              head: `${owner}:${head}`,
+              base,
+              state: 'open',
+              per_page: 100
+            });
+
+            let prNumber;
+            if (existing.length > 0) {
+              prNumber = existing[0].number;
+              console.log(`Found existing PR #${prNumber} for ${head} -> ${base}: ${existing[0].html_url}`);
+            } else {
+              // 2) Create PR
+              const title = `Auto PR: Sync ${head} → ${base}`;
+              const body = `This PR was automatically created to sync branch **${head}** into **${base}**.`;
+              const { data: created } = await github.rest.pulls.create({
+                owner,
+                repo,
+                title,
+                head,
+                base,
+                body,
+                maintainer_can_modify: true
+              });
+              prNumber = created.number;
+              console.log(`Created PR #${prNumber} for ${head} -> ${base}: ${created.html_url}`);
+            }
+
+            // 3) Try to merge
+            try {
+              const { data: mergeResult } = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: prNumber,
+                merge_method: 'merge' // change to 'squash' or 'rebase' if desired
+              });
+              if (mergeResult.merged) {
+                console.log(`✅ Merged PR #${prNumber} into ${base}`);
+              } else {
+                console.log(`ℹ️ PR #${prNumber} was not merged. Response: ${JSON.stringify(mergeResult)}`);
+              }
+            } catch (err) {
+              console.log(`❌ Merge failed for PR #${prNumber}: ${err.message}`);
+              // Re-throw if you want the job to fail:
+              // throw err;
+            }
