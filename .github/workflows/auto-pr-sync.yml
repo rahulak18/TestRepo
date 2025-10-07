@@ -1,0 +1,74 @@
+name: Auto-create & merge PRs from v1t -> v1c & v1dev
+
+on:
+  push:
+    branches:
+      - v1t
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync_branches:
+    name: Create and merge PRs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v5
+
+      - name: Create and merge PRs
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headBranch = context.ref.replace('refs/heads/', '');
+            const targets = ['v1c', 'v1dev'];
+
+            for (const base of targets) {
+              // 1. Check for an existing open PR from v1t -> base
+              const { data: prs } = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${headBranch}`,
+                base,
+                state: 'open',
+                per_page: 100
+              });
+
+              let prNumber;
+              if (prs.length > 0) {
+                prNumber = prs[0].number;
+                console.log(`Existing PR found for ${headBranch} -> ${base}: #${prNumber}`);
+              } else {
+                // 2. Create new PR
+                const title = `Auto PR: Sync ${headBranch} → ${base}`;
+                const body = `This pull request was automatically created to sync branch **${headBranch}** into **${base}**.`;
+                const { data: newPr } = await github.rest.pulls.create({
+                  owner,
+                  repo,
+                  title,
+                  head: headBranch,
+                  base,
+                  body,
+                  maintainer_can_modify: true
+                });
+                prNumber = newPr.number;
+                console.log(`Created new PR #${prNumber} for ${headBranch} -> ${base}`);
+              }
+
+              // 3. Merge the PR immediately
+              try {
+                await github.rest.pulls.merge({
+                  owner,
+                  repo,
+                  pull_number: prNumber,
+                  merge_method: 'merge'  // or 'squash' or 'rebase'
+                });
+                console.log(`✅ Successfully merged PR #${prNumber} into ${base}`);
+              } catch (err) {
+                console.log(`❌ Failed to merge PR #${prNumber} into ${base}: ${err.message}`);
+              }
+            }
