@@ -1,0 +1,102 @@
+name: Recon Action from t areas to c areas
+
+on:
+  schedule:
+    # 4:00 PM IST = 10:30 AM UTC → Only on Fridays
+    - cron: "30 10 * * 5"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-multi-branch-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Create & Merge PRs Between Branch Mappings
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Define branch mappings here — scalable and editable
+            const branchMappings = [
+              { from: '11.21-T-base', to: ['11.21-base'] },
+              { from: '11.20-T-base', to: ['11.20-base'] },
+              { from: '11.19-T-base', to: ['11.19-base'] },
+              { from: '11.18-T-base', to: ['11.18-base'] },
+              { from: '11.17-T-base', to: ['11.17-base'] },
+              { from: '11.15-T-base', to: ['11.15-base'] },
+              { from: '11.13-T-base', to: ['11.13-base'] },
+            ];
+
+            for (const mapping of branchMappings) {
+              const { from, to } = mapping;
+              console.log(`\n Processing source branch: ${from}`);
+
+              for (const target of to) {
+                console.log(`\n Checking PR from ${from} → ${target}`);
+
+                try {
+                  // Check if PR already exists
+                  const { data: existing } = await github.rest.pulls.list({
+                    owner,
+                    repo,
+                    head: `${owner}:${from}`,
+                    base: target,
+                    state: 'open'
+                  });
+
+                  let prNumber;
+                  if (existing.length > 0) {
+                    prNumber = existing[0].number;
+                    console.log(`Existing PR #${prNumber} found for ${from} → ${target}`);
+                  } else {
+                    // Create PR
+                    const { data: pr } = await github.rest.pulls.create({
+                      owner,
+                      repo,
+                      head: from,
+                      base: target,
+                      title: `Auto PR: Sync ${from} → ${target}`,
+                      body: `This PR was auto-created by GitHub Actions on schedule.`
+                    });
+                    prNumber = pr.number;
+                    console.log(`Created PR #${prNumber} for ${from} → ${target}`);
+                  }
+
+                  // Attempt merge
+                  try {
+                    const merge = await github.rest.pulls.merge({
+                      owner,
+                      repo,
+                      pull_number: prNumber,
+                      merge_method: 'merge'
+                    });
+
+                    if (merge.data.merged) {
+                      console.log(`Successfully merged PR #${prNumber} (${from} → ${target})`);
+                    } else {
+                      console.log(`PR #${prNumber} not merged for ${target}: ${merge.data.message || 'Unknown reason'}`);
+                    }
+                  } catch (mergeError) {
+                    console.log(`Merge failed for ${from} → ${target}: ${mergeError.message}`);
+                  }
+
+                } catch (err) {
+                  if (err.status === 422 && err.message.includes('No commits between')) {
+                    console.log(`No changes to merge between ${from} and ${target}. Skipping...`);
+                  } else {
+                    console.log(`Error processing ${from} → ${target}: ${err.message}`);
+                  }
+                }
+              }
+            }
+
+            console.log("\n Recon action is completed.");
